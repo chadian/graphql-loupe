@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "graphql": "^14.3.1",
     "graphql-ast-types": "^1.0.2"
   },
   "devDependencies": {
