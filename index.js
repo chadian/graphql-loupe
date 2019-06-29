@@ -2,7 +2,6 @@ const t = require('graphql-ast-types');
 const gql = require('graphql');
 const expect = require('chai').expect;
 
-
 const schemaString = `
   schema {
     query: Query
@@ -14,23 +13,13 @@ const schemaString = `
 
   type Person {
     name: String
+    address: Address
+  }
+
+  type Address {
+    city: String
   }
 `;
-
-const schema = gql.buildSchema(schemaString);
-
-const PersonType = schema.getType('Person')
-
-const query = `
-query {
-  people {
-    name
-  }
-}
-`;
-
-const queryAst = gql.parse(query);
-// queryAst.definitions[0].selectionSet.selections
 
 function followPath(type, path) {
   if (!path.length) {
@@ -41,8 +30,8 @@ function followPath(type, path) {
   const typeFields = type.getFields()
   const field = typeFields[fieldName]
 
-  if (t.isObjectTypeDefinition()) {
-    return followPath(field, shiftedPath)
+  if (t.isObjectTypeDefinition(field.type.astNode)) {
+    return followPath(field.type, shiftedPath)
   }
 
   return field;
@@ -84,23 +73,54 @@ function l(schema) {
   return new Loupe(schema);
 }
 
-
 describe('loupe', function() {
   let loupe;
 
   beforeEach(() => {
     loupe = l(schemaString);
-  })
+  });
 
   it('accepts a schema string', function() {
     expect(loupe).to.be.instanceOf(Loupe);
   });
 
-  it('can scope to a path in the AST', function() {
-    const result = loupe.path('Person.name');
+  it('scopes a path to a type', function() {
+    const result = loupe.path('Person');
+    expect(result.scope.name).to.equal('Person')
+    expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
+  })
 
+  it('scopes a path to a field on a type', function() {
+    const result = loupe.path('Person.name');
     expect(t.isFieldDefinition(result.scope.astNode)).to.be.true
-    expect(result.scope.type.name).to.equal('String')
     expect(result.scope.name).to.equal('name')
+    expect(result.scope.type.name).to.equal('String')
+  });
+
+  it('scopes a path to a nested field on a type', function() {
+    const result = loupe.path('Person.address.city');
+    expect(t.isFieldDefinition(result.scope.astNode)).to.be.true;
+    expect(result.scope.name).to.equal('city');
+    expect(result.scope.type.name).to.equal('String');
+  });
+
+  it('scopes a path to the root `Query` type', function() {
+    const result = loupe.path('Query');
+    debugger;
   })
 });
+
+// const schema = gql.buildSchema(schemaString);
+
+// const PersonType = schema.getType('Person')
+
+// const query = `
+// query {
+//   people {
+//     name
+//   }
+// }
+// `;
+
+// const queryAst = gql.parse(query);
+// queryAst.definitions[0].selectionSet.selections
