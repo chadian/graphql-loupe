@@ -239,38 +239,8 @@ describe('loupe', function() {
   });
 });
 
-// describe('TypeInfo', function() {
-//   let tInfo;
-//   const schema = gql.buildSchema(schemaString);
-
-//   beforeEach(() => {
-//     tInfo = new TypeInfo(schema);
-//   })
-
-//   it('works', function() {
-//     visit(gql.parse(`query { people }`), visitWithTypeInfo(tInfo, { enter(node) {
-//       // tInfo.enter(node)
-//       tInfo;
-//       debugger
-//     }, leave(node) {
-//       // tInfo.leave(node)
-//     } }));
-
-//     debugger;
-//   })
-// })
-
-// const schema = gql.buildSchema(schemaString);
-
-// const PersonType = schema.getType('Person')
-
-// const query = `
-// query {
-//   people {
-//     name
-//   }
-// }
-// `;
-
-// const queryAst = gql.parse(query);
-// queryAst.definitions[0].selectionSet.selections
+// test cases
+// * overwrite existing mock with new one
+// * handle variables and arguments
+// * ast getter
+// * path movement, up, down, siblings
