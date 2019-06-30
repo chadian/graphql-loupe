@@ -223,7 +223,7 @@ describe('loupe', function() {
           people: () => ({
             name: 'Batman',
             address: {
-              city: 'New York'
+              city: 'Gotham City'
             }
           })
         }
@@ -234,7 +234,7 @@ describe('loupe', function() {
         .query(query);
 
       expect(result.data.people.name).to.equal('Batman');
-      expect(result.data.people.address.city).to.equal('New York');
+      expect(result.data.people.address.city).to.equal('Gotham City');
     });
   });
 });
