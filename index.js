@@ -2,6 +2,8 @@ const t = require('graphql-ast-types');
 const gql = require('graphql');
 const expect = require('chai').expect;
 
+const {TypeInfo, visit, visitWithTypeInfo} = gql;
+
 const schemaString = `
   schema {
     query: Query
@@ -21,27 +23,32 @@ const schemaString = `
   }
 `;
 
-function followPath(type, path) {
-  if (!path.length) {
-    return type;
+function followPath(type, pathOfFieldnames, fieldPath=[]) {
+  if (!pathOfFieldnames.length) {
+    return fieldPath;
   }
 
-  let [fieldName, ...shiftedPath] = path
+  let [fieldName, ...shiftedPath] = pathOfFieldnames
   const typeFields = type.getFields()
   const field = typeFields[fieldName]
 
+  fieldPath.push(field);
+
   if (t.isObjectTypeDefinition(field.type.astNode)) {
-    return followPath(field.type, shiftedPath)
+    return followPath(field.type, shiftedPath, fieldPath)
   }
 
-  return field;
+  return fieldPath;
 }
 
 class Loupe {
-  constructor(schemaString) {
-    this.schemaString = schemaString
-    this.schema = gql.buildSchema(schemaString)
-    this.scope = this.root = this.schema.astNode
+  constructor(schema) {
+    if (typeof schema === 'string') {
+      schema = gql.buildSchema(schema);
+    }
+
+    this.schema = schema;
+    this.scope = this.root = this.schema.astNode;
   }
 
   get isRoot() {
@@ -59,10 +66,11 @@ class Loupe {
     }
 
     if (path.length > 0) {
-      scope = followPath(scope, path);
+      const fieldPaths = followPath(scope, path);
+      scope = fieldPaths[fieldPaths.length - 1]
     }
 
-    const l = new Loupe(this.schemaString);
+    const l = new Loupe(this.schema);
     l.scope = scope;
     return l;
   }
@@ -106,9 +114,29 @@ describe('loupe', function() {
 
   it('scopes a path to the root `Query` type', function() {
     const result = loupe.path('Query');
-    debugger;
   })
 });
+
+// describe('TypeInfo', function() {
+//   let tInfo;
+//   const schema = gql.buildSchema(schemaString);
+
+//   beforeEach(() => {
+//     tInfo = new TypeInfo(schema);
+//   })
+
+//   it('works', function() {
+//     visit(gql.parse(`query { people }`), visitWithTypeInfo(tInfo, { enter(node) {
+//       // tInfo.enter(node)
+//       tInfo;
+//       debugger
+//     }, leave(node) {
+//       // tInfo.leave(node)
+//     } }));
+
+//     debugger;
+//   })
+// })
 
 // const schema = gql.buildSchema(schemaString);
 
