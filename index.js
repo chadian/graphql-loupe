@@ -2,7 +2,7 @@ const t = require('graphql-ast-types');
 const gql = require('graphql');
 const expect = require('chai').expect;
 
-const {TypeInfo, visit, visitWithTypeInfo} = gql;
+const { addMockFunctionsToSchema } = require('graphql-tools');
 
 const schemaString = `
   schema {
@@ -48,30 +48,66 @@ class Loupe {
     }
 
     this.schema = schema;
-    this.scope = this.root = this.schema.astNode;
+    this.root = this.schema.astNode;
+    this.pathScope = [this.root]
   }
 
   get isRoot() {
     return t.isSchemaDefinition(this.scope)
   }
 
+  get scope() {
+    return this.pathScope[this.pathScope.length - 1]
+  }
+
+  getSchema() {
+    return this.schema;
+  }
+
+  mock(mockObject) {
+    for (let [key, value] of Object.entries(mockObject)) {
+      if (typeof value === 'object') {
+        mockObject[key] = () => value;
+      }
+    }
+
+    addMockFunctionsToSchema({
+      schema: this.schema,
+      mocks: mockObject
+    });
+
+    return this;
+  }
+
+  async query(queryString) {
+    return gql.graphql(this.schema, queryString);
+  }
+
   path(pathString) {
-    let path = pathString.split('.');
-    let scope = this.scope;
+    let requestedPath = pathString.split('.');
+    const pathScope = [].concat(this.pathScope);
 
     if (this.isRoot) {
-      let [type, ...shiftedPath] = path;
-      path = shiftedPath;
-      scope = this.schema.getType(type);
+      const [typeString, ...shiftedPath] = requestedPath;
+      const type = this.schema.getType(typeString);
+      // push type on to path
+      pathScope.push(type);
+
+      // reset requestedPath to start with fields on type
+      requestedPath = shiftedPath;
     }
 
-    if (path.length > 0) {
-      const fieldPaths = followPath(scope, path);
-      scope = fieldPaths[fieldPaths.length - 1]
+    let fieldPaths = [];
+    if (requestedPath.length > 0) {
+      fieldPaths = followPath(pathScope[pathScope.length - 1], requestedPath);
     }
+
+    pathScope.push(...fieldPaths);
 
     const l = new Loupe(this.schema);
-    l.scope = scope;
+
+    // set new instance with updated pathScope
+    l.pathScope = pathScope;
     return l;
   }
 }
@@ -96,7 +132,7 @@ describe('loupe', function() {
     const result = loupe.path('Person');
     expect(result.scope.name).to.equal('Person')
     expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
-  })
+  });
 
   it('scopes a path to a field on a type', function() {
     const result = loupe.path('Person.name');
@@ -114,7 +150,93 @@ describe('loupe', function() {
 
   it('scopes a path to the root `Query` type', function() {
     const result = loupe.path('Query');
-  })
+  });
+
+  describe('mocking types', function() {
+    const query = `
+      query {
+        people {
+          name
+          address {
+            city
+          }
+        }
+      }
+    `;
+
+    context('with functions', function() {
+      it('can mock at the root level', async function() {
+        const mocks = {
+          Person: () => ({
+            name: 'Sam Malone'
+          }),
+          Address: () => ({
+            city: 'Boston'
+          })
+        };
+
+        let result = await loupe
+          .mock(mocks)
+          .query(query);
+
+        expect(result.data.people.name).to.equal('Sam Malone');
+        expect(result.data.people.address.city).to.equal('Boston');
+      });
+    });
+
+    context('with objects', function() {
+      it('can mock at the root level', async function() {
+        const mocks = {
+          Person: {
+            name: 'Sam Malone'
+          },
+          Address: {
+            city: 'Boston'
+          }
+        };
+
+        let result = await loupe
+          .mock(mocks)
+          .query(query);
+
+        expect(result.data.people.name).to.equal('Sam Malone');
+        expect(result.data.people.address.city).to.equal('Boston');
+      });
+    });
+  });
+
+  describe('mocking queries', function() {
+    const query = `
+      query {
+        people {
+          name
+          address {
+            city
+          }
+        }
+      }
+    `;
+
+    it('can mock a query on the Query type', async function() {
+      const mocks = {
+        Query: {
+          people: () => ({
+            name: 'Batman',
+            address: {
+              city: 'New York'
+            }
+          })
+        }
+      };
+
+      let result = await loupe
+        .mock(mocks)
+        .query(query);
+
+      expect(result.data.people.name).to.equal('Batman');
+      expect(result.data.people.address.city).to.equal('New York');
+    });
+  });
 });
 
 // describe('TypeInfo', function() {
