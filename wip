@@ -1,0 +1,75 @@
+// ... given
+const mock = {
+  Query: (parent, args, context, info) => ({
+    people: (parent, args, context, info) => ({
+      name: (parent, args, context, info) => 'Chad'
+    })
+  })
+};
+
+// ... and the ability to generate
+const generatedMock = {
+  Query: () => {
+    people: () => ({
+      // the only thing I want to mock
+      name: (parent, args, context, info) => 'Chad'
+    })
+  }
+};
+
+// will lazily hold mocks until execution
+takeMock(mock);
+
+// {
+//   'name' : { resolve, args, resolver }[]
+// }
+
+
+// maybe this could be rewritten with a generator
+// the function returns a promise. That promise
+// only resolves when the generator has exhausted
+// iterating the mock objects which
+
+handleMocks(mockObjects) {
+  for (const mockObject of mockObjects) {
+    const mockEntries = Object.entries(mockObject);
+    const map = {};
+
+    for (const [key, resolver] in mockEntries) {
+      mockObject[key] = (parent, args, context, info) => {
+        const args = [...arguments];
+        map[key] = map[key] || [];
+
+        return new Promise((resolve) => {
+          map[key].push({
+            resolve,
+            args,
+            resolver
+          });
+        });
+      }
+    }
+  }
+
+  Object
+    .entries(map)
+    .reduce(({args, result}, [key, metas]) => {
+      args = args || metas.args;
+
+      let returned = metas.resolver(args);
+
+      if (typeof result === 'object') {
+        result = result = [];
+        result.push(returned);
+      } else {
+        result = returned;
+      }
+
+      return {args, result, metas}
+
+    }, {args: null, result: null, metas: null})
+    .map(({args, result, metas}) => {
+        result = typeof result === 'object' ? handleMocks(result) : result
+        meta.resolve(result)
+    });
+}
