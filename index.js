@@ -48,7 +48,7 @@ class Loupe {
       schema = gql.buildSchema(schema);
     }
 
-    this.schema = schema;
+    this._schema = schema;
     this.root = this.schema.astNode;
     this.pathScope = [this.root]
   }
@@ -61,8 +61,8 @@ class Loupe {
     return this.pathScope[this.pathScope.length - 1]
   }
 
-  getSchema() {
-    return this.schema;
+  get schema() {
+    return this._schema;
   }
 
   mock(mockObject) {
@@ -82,6 +82,24 @@ class Loupe {
 
   async query(queryString) {
     return gql.graphql(this.schema, queryString);
+  }
+
+  get ast() {
+    return this.scope.astNode;
+  }
+
+  get parent() {
+    let pathScope;
+
+    if (this.pathScope.length > 1) {
+      pathScope = this.pathScope.splice(0, this.pathScope.length - 1);
+    } else {
+      pathScope = this.root;
+    }
+
+    const l = new Loupe(this.schema);
+    l.pathScope = pathScope;
+    return l;
   }
 
   path(pathString) {
@@ -125,32 +143,59 @@ describe('loupe', function() {
     loupe = l(schemaString);
   });
 
-  it('accepts a schema string', function() {
+  it('accepts a schema string', function () {
     expect(loupe).to.be.instanceOf(Loupe);
   });
 
-  it('scopes a path to a type', function() {
-    const result = loupe.path('Person');
-    expect(result.scope.name).to.equal('Person')
-    expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
-  });
+  context('navigating', function() {
+    context('traversing down a path', function() {
+      it('scopes a path to a type', function() {
+        const result = loupe.path('Person');
+        expect(result.scope.name).to.equal('Person')
+        expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
+      });
 
-  it('scopes a path to a field on a type', function() {
-    const result = loupe.path('Person.name');
-    expect(t.isFieldDefinition(result.scope.astNode)).to.be.true
-    expect(result.scope.name).to.equal('name')
-    expect(result.scope.type.name).to.equal('String')
-  });
+      it('scopes a path to the `Query` type', function () {
+        const result = loupe.path('Query');
+        expect(result.scope.name).to.equal('Query')
+        expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
+      });
 
-  it('scopes a path to a nested field on a type', function() {
-    const result = loupe.path('Person.address.city');
-    expect(t.isFieldDefinition(result.scope.astNode)).to.be.true;
-    expect(result.scope.name).to.equal('city');
-    expect(result.scope.type.name).to.equal('String');
-  });
+      it('scopes a path to a field on a type', function() {
+        const result = loupe.path('Person.name');
+        expect(result.scope.name).to.equal('name')
+        expect(result.scope.type.name).to.equal('String')
+        expect(t.isFieldDefinition(result.scope.astNode)).to.be.true;
+      });
 
-  it('scopes a path to the root `Query` type', function() {
-    const result = loupe.path('Query');
+      it('scopes a path to a nested field on a type', function() {
+        const result = loupe.path('Person.address.city');
+        expect(t.isFieldDefinition(result.scope.astNode)).to.be.true;
+        expect(result.scope.name).to.equal('city');
+        expect(result.scope.type.name).to.equal('String');
+      });
+
+      it('scopes a path to a field on the root `Query` type', function() {
+        const result = loupe.path('Query.people');
+        expect(result.scope.name).to.equal('people');
+        expect(result.scope.type.name).to.equal('Person');
+      });
+    });
+
+    context('traversing up', function() {
+      it('can traverse up from a Type to the root schema', function () {
+        const result = loupe.path('Person').parent;
+        expect(result.isRoot).to.be.true;
+        expect(result.scope.kind).to.equal('SchemaDefinition');
+        expect(t.isSchemaDefinition(result.scope)).to.be.true
+      });
+
+      it('can traverse up from a field to its type', function () {
+        const result = loupe.path('Person.name').parent;
+        expect(result.scope.name).to.equal('Person')
+        expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
+      });
+    });
   });
 
   describe('mocking types', function() {
