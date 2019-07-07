@@ -65,25 +65,6 @@ class Loupe {
     return this._schema;
   }
 
-  mock(mockObject) {
-    for (let [key, value] of Object.entries(mockObject)) {
-      if (typeof value === 'object') {
-        mockObject[key] = () => value;
-      }
-    }
-
-    addMockFunctionsToSchema({
-      schema: this.schema,
-      mocks: mockObject
-    });
-
-    return this;
-  }
-
-  async query(queryString) {
-    return gql.graphql(this.schema, queryString);
-  }
-
   get ast() {
     return this.scope.astNode;
   }
@@ -128,6 +109,25 @@ class Loupe {
     // set new instance with updated pathScope
     l.pathScope = pathScope;
     return l;
+  }
+
+  async query(queryString) {
+    return gql.graphql(this.schema, queryString);
+  }
+
+  mock(mockObject) {
+    for (let [key, value] of Object.entries(mockObject)) {
+      if (typeof value === 'object') {
+        mockObject[key] = () => value;
+      }
+    }
+
+    addMockFunctionsToSchema({
+      schema: this.schema,
+      mocks: mockObject
+    });
+
+    return this;
   }
 }
 
