@@ -1,9 +1,9 @@
-const t = require('graphql-ast-types');
-const gql = require('graphql');
-const expect = require('chai').expect;
-const R = require('ramda');
+// import t from 'graphql-ast-types';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType } from 'graphql';
+import { expect } from 'chai';
+import R from 'ramda';
 
-const { addMockFunctionsToSchema } = require('graphql-tools');
+import { addMockFunctionsToSchema, IMocks } from 'graphql-tools';
 
 const schemaString = `
   schema {
@@ -24,37 +24,47 @@ const schemaString = `
   }
 `;
 
-function followPath(type, pathOfFieldnames, fieldPath=[]) {
+function followPath(fields: Field[], pathOfFieldnames: string[]): pathable[] {
   if (!pathOfFieldnames.length) {
-    return fieldPath;
+    return fields;
   }
 
-  let [fieldName, ...shiftedPath] = pathOfFieldnames
-  const typeFields = type.getFields()
-  const field = typeFields[fieldName]
+  const field = fields[fields.length - 1];
 
-  fieldPath.push(field);
+  if (field.type instanceof GraphQLObjectType) {
+    const [fieldName, ...shiftedPath] = pathOfFieldnames;
+    const typeFields = field.type.getFields();
+    const childField = typeFields[fieldName];
 
-  if (t.isObjectTypeDefinition(field.type.astNode)) {
-    return followPath(field.type, shiftedPath, fieldPath)
+    if (childField) {
+      return followPath([...fields, childField], shiftedPath)
+    } else {
+      throw `Could not find ${fieldName}`;
+    }
   }
 
-  return fieldPath;
+  return fields;
 }
 
+type Field = GraphQLField<any, any>;
+type pathable = GraphQLSchema | GraphQLObjectType | Field;
+type schemable = string | GraphQLSchema;
+
 class Loupe {
-  constructor(schema) {
+  private _schema: GraphQLSchema;
+  pathScope: pathable[];
+
+  constructor(schema: schemable) {
     if (typeof schema === 'string') {
-      schema = gql.buildSchema(schema);
+      schema = buildSchema(schema);
     }
 
     this._schema = schema;
-    this.root = this.schema.astNode;
-    this.pathScope = [this.root]
+    this.pathScope = [this.schema]
   }
 
   get isRoot() {
-    return t.isSchemaDefinition(this.scope)
+    return this.scope instanceof GraphQLSchema;
   }
 
   get scope() {
@@ -70,12 +80,12 @@ class Loupe {
   }
 
   get parent() {
-    let pathScope;
+    let pathScope: pathable[];
 
     if (this.pathScope.length > 1) {
       pathScope = this.pathScope.splice(0, this.pathScope.length - 1);
     } else {
-      pathScope = this.root;
+      pathScope = [this.schema];
     }
 
     const l = new Loupe(this.schema);
@@ -83,39 +93,56 @@ class Loupe {
     return l;
   }
 
-  path(pathString) {
+  path(pathString: string) {
     let requestedPath = pathString.split('.');
-    const pathScope = [].concat(this.pathScope);
+    const pathScope: pathable[] = Object.assign([], this.pathScope);
+
+    if (requestedPath.length < 1) {
+      return this;
+    }
 
     if (this.isRoot) {
-      const [typeString, ...shiftedPath] = requestedPath;
+      const typeString = requestedPath.shift() as string;
       const type = this.schema.getType(typeString);
+
+      if (!(type instanceof GraphQLObjectType)) {
+        throw new TypeError(`${typeString} is not an Object Type that can be used for the path`);
+      }
+
       // push type on to path
       pathScope.push(type);
-
-      // reset requestedPath to start with fields on type
-      requestedPath = shiftedPath;
     }
 
-    let fieldPaths = [];
+    let fields: Field[] = [];
     if (requestedPath.length > 0) {
-      fieldPaths = followPath(pathScope[pathScope.length - 1], requestedPath);
+      let startingField;
+
+      if (pathScope.length === 2) {
+        const type = pathScope[pathScope.length - 1] as GraphQLObjectType;
+        const fieldName = requestedPath.shift() as string;
+        startingField = type.getFields()[fieldName];
+      } else {
+        startingField = pathScope[pathScope.length - 1];
+      }
+
+      if (startingField) {
+        fields = followPath([startingField as Field], requestedPath) as Field[];
+      }
     }
 
-    pathScope.push(...fieldPaths);
+    pathScope.push(...fields);
 
     const l = new Loupe(this.schema);
-
     // set new instance with updated pathScope
     l.pathScope = pathScope;
     return l;
   }
 
-  async query(queryString) {
-    return gql.graphql(this.schema, queryString);
+  async query(queryString: string) {
+    return graphql(this.schema, queryString);
   }
 
-  mock(mockObject) {
+  mock(mockObject: IMocks) {
     for (let [key, value] of Object.entries(mockObject)) {
       if (typeof value === 'object') {
         mockObject[key] = () => value;
@@ -132,12 +159,12 @@ class Loupe {
 }
 
 
-function l(schema) {
+function l(schema: schemable) {
   return new Loupe(schema);
 }
 
 describe('loupe', function() {
-  let loupe;
+  let loupe: Loupe;
 
   beforeEach(() => {
     loupe = l(schemaString);
@@ -149,36 +176,33 @@ describe('loupe', function() {
 
   context('navigating', function() {
     context('traversing down a path', function() {
-      it('scopes a path to a type', function() {
-        const result = loupe.path('Person');
-        expect(result.scope.name).to.equal('Person')
-        expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
-      });
-
       it('scopes a path to the `Query` type', function () {
         const result = loupe.path('Query');
-        expect(result.scope.name).to.equal('Query')
-        expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
+        expect((result.scope as GraphQLNamedType).name).to.equal('Query')
+      });
+
+      it('scopes a path to a type', function() {
+        const result = loupe.path('Person');
+        expect((result.scope as GraphQLNamedType).name).to.equal('Person')
       });
 
       it('scopes a path to a field on a type', function() {
         const result = loupe.path('Person.name');
-        expect(result.scope.name).to.equal('name')
-        expect(result.scope.type.name).to.equal('String')
-        expect(t.isFieldDefinition(result.scope.astNode)).to.be.true;
+        expect((result.scope as GraphQLNamedType).name).to.equal('name')
       });
 
       it('scopes a path to a nested field on a type', function() {
         const result = loupe.path('Person.address.city');
-        expect(t.isFieldDefinition(result.scope.astNode)).to.be.true;
-        expect(result.scope.name).to.equal('city');
-        expect(result.scope.type.name).to.equal('String');
+        const scope = result.scope as Field;
+        expect(scope.name).to.equal('city');
+        expect((scope.type as GraphQLScalarType).name).to.equal('String');
       });
 
       it('scopes a path to a field on the root `Query` type', function() {
         const result = loupe.path('Query.people');
-        expect(result.scope.name).to.equal('people');
-        expect(result.scope.type.name).to.equal('Person');
+        const scope = result.scope as Field;
+        expect(scope.name).to.equal('people');
+        expect((scope.type as GraphQLObjectType).name).to.equal('Person');
       });
     });
 
@@ -186,199 +210,198 @@ describe('loupe', function() {
       it('can traverse up from a Type to the root schema', function () {
         const result = loupe.path('Person').parent;
         expect(result.isRoot).to.be.true;
-        expect(result.scope.kind).to.equal('SchemaDefinition');
-        expect(t.isSchemaDefinition(result.scope)).to.be.true
+        expect(result.scope instanceof GraphQLSchema).to.be.true;
       });
 
       it('can traverse up from a field to its type', function () {
         const result = loupe.path('Person.name').parent;
-        expect(result.scope.name).to.equal('Person')
-        expect(t.isObjectTypeDefinition(result.scope.astNode)).to.be.true
+        const scope = result.scope as Field;
+        expect(scope.name).to.equal('Person')
       });
     });
   });
 
-  describe('mocking types', function() {
-    const query = `
-      query {
-        people {
-          name
-          address {
-            city
-          }
-        }
-      }
-    `;
+  // describe('mocking types', function() {
+  //   const query = `
+  //     query {
+  //       people {
+  //         name
+  //         address {
+  //           city
+  //         }
+  //       }
+  //     }
+  //   `;
 
-    context('with functions', function() {
-      it('can mock at the root level', async function() {
-        const mocks = {
-          Person: () => ({
-            name: 'Sam Malone'
-          }),
-          Address: () => ({
-            city: 'Boston'
-          })
-        };
+  //   context('with functions', function() {
+  //     it('can mock at the root level', async function() {
+  //       const mocks = {
+  //         Person: () => ({
+  //           name: 'Sam Malone'
+  //         }),
+  //         Address: () => ({
+  //           city: 'Boston'
+  //         })
+  //       };
 
-        let result = await loupe
-          .mock(mocks)
-          .query(query);
+  //       let result = await loupe
+  //         .mock(mocks)
+  //         .query(query);
 
-        expect(result.data.people.name).to.equal('Sam Malone');
-        expect(result.data.people.address.city).to.equal('Boston');
-      });
-    });
+  //       expect(result.data.people.name).to.equal('Sam Malone');
+  //       expect(result.data.people.address.city).to.equal('Boston');
+  //     });
+  //   });
 
-    context('with objects', function() {
-      it('can mock at the root level', async function() {
-        const mocks = {
-          Person: {
-            name: 'Sam Malone'
-          },
-          Address: {
-            city: 'Boston'
-          }
-        };
+  //   context('with objects', function() {
+  //     it('can mock at the root level', async function() {
+  //       const mocks = {
+  //         Person: {
+  //           name: 'Sam Malone'
+  //         },
+  //         Address: {
+  //           city: 'Boston'
+  //         }
+  //       };
 
-        let result = await loupe
-          .mock(mocks)
-          .query(query);
+  //       let result = await loupe
+  //         .mock(mocks)
+  //         .query(query);
 
-        expect(result.data.people.name).to.equal('Sam Malone');
-        expect(result.data.people.address.city).to.equal('Boston');
-      });
-    });
-  });
+  //       expect(result.data.people.name).to.equal('Sam Malone');
+  //       expect(result.data.people.address.city).to.equal('Boston');
+  //     });
+  //   });
+  // });
 
-  describe('mocking queries', function() {
-    const query = `
-      query {
-        people {
-          name
-          address {
-            city
-          }
-        }
-      }
-    `;
+  // describe('mocking queries', function() {
+  //   const query = `
+  //     query {
+  //       people {
+  //         name
+  //         address {
+  //           city
+  //         }
+  //       }
+  //     }
+  //   `;
 
-    it('can mock a query on the Query type', async function() {
-      const mocks = {
-        Query: {
-          people: () => ({
-            name: 'Batman',
-            address: {
-              city: 'Gotham City'
-            }
-          })
-        }
-      };
+  //   it('can mock a query on the Query type', async function() {
+  //     const mocks = {
+  //       Query: {
+  //         people: () => ({
+  //           name: 'Batman',
+  //           address: {
+  //             city: 'Gotham City'
+  //           }
+  //         })
+  //       }
+  //     };
 
-      let result = await loupe
-        .mock(mocks)
-        .query(query);
+  //     let result = await loupe
+  //       .mock(mocks)
+  //       .query(query);
 
-      expect(result.data.people.name).to.equal('Batman');
-      expect(result.data.people.address.city).to.equal('Gotham City');
-    });
-  });
+  //     expect(result.data.people.name).to.equal('Batman');
+  //     expect(result.data.people.address.city).to.equal('Gotham City');
+  //   });
+  // });
 });
 
-it('resolves recursively', async function() {
-  const mocks = {
-    Query: resolverList({
-      people: [resolverList(
-        {
-          name: 'Jim Halpert',
-          branch: 'Scranton',
-        },
-        {
-          branch: 'Stamford',
-          likes: ['Swimming', 'Hiking']
-        },
-        {
-          branch: () => 'Scranton',
-          likes: () => ['paper']
-        },
-        {
-          likes: () => Promise.resolve(['pranking dwight'])
-        }
-      )]
-    })
-  }
+// it('resolves recursively', async function() {
+//   const mocks = {
+//     Query: resolverList({
+//       people: [resolverList(
+//         {
+//           name: 'Jim Halpert',
+//           branch: 'Scranton',
+//         },
+//         {
+//           branch: 'Stamford',
+//           likes: ['Swimming', 'Hiking']
+//         },
+//         {
+//           branch: () => 'Scranton',
+//           likes: () => ['paper']
+//         },
+//         {
+//           likes: () => Promise.resolve(['pranking dwight'])
+//         }
+//       )]
+//     })
+//   }
 
-  function resolverList(...args) {
-    args.__resolverList = true;
-    return args;
-  }
+//   function resolverList(...args) {
+//     args.__resolverList = true;
+//     return args;
+//   }
 
-  function mergeRightAll(...objects) {
-    return objects.reduce(((merged, obj) => {
-      return R.mergeDeepWith((_a, b) => b, merged, obj);
-    }), {})
-  }
+//   function mergeRightAll(...objects) {
+//     return objects.reduce(((merged, obj) => {
+//       return R.mergeDeepWith((_a, b) => b, merged, obj);
+//     }), {})
+//   }
 
-  const reduceResolvers = async (resolvers) => {
-    const resolved = await Promise.all(resolvers.map(resolve));
-    const shouldMerge = typeof resolved[0] === 'object' && resolvers.__resolverList;
+//   const reduceResolvers = async (resolvers) => {
+//     const resolved = await Promise.all(resolvers.map(resolve));
+//     const shouldMerge = typeof resolved[0] === 'object' && resolvers.__resolverList;
 
-    if (Array.isArray(resolved[0])) {
-      return resolved[resolved.length - 1];
-    }
+//     if (Array.isArray(resolved[0])) {
+//       return resolved[resolved.length - 1];
+//     }
 
-    if (shouldMerge) {
-      if (resolved.length > 1) {
-        return mergeRightAll(...resolved);
-      } else {
-        return resolved[0];
-      }
-    }
+//     if (shouldMerge) {
+//       if (resolved.length > 1) {
+//         return mergeRightAll(...resolved);
+//       } else {
+//         return resolved[0];
+//       }
+//     }
 
-    return resolved;
-  }
+//     return resolved;
+//   }
 
-  async function resolve(resolver) {
-    if (resolver.then) {
-      return await Promise.resolve(resolver);
-    }
+//   async function resolve(resolver) {
+//     if (resolver.then) {
+//       return await Promise.resolve(resolver);
+//     }
 
-    if (Array.isArray(resolver)) {
-      return await reduceResolvers(resolver);
-    }
+//     if (Array.isArray(resolver)) {
+//       return await reduceResolvers(resolver);
+//     }
 
-    if (typeof resolver === 'object') {
-      return await traverseResolvers(resolver);
-    }
+//     if (typeof resolver === 'object') {
+//       return await traverseResolvers(resolver);
+//     }
 
-    if (typeof resolver === 'function') {
-      return await resolve(resolver());
-    }
+//     if (typeof resolver === 'function') {
+//       return await resolve(resolver());
+//     }
 
-    return resolver;
-  }
+//     return resolver;
+//   }
 
 
-  async function traverseResolvers(mocks) {
-    const resolved = {};
+//   async function traverseResolvers(mocks) {
+//     const resolved = {};
 
-    for (const [key, resolver] of Object.entries(mocks)) {
-      resolved[key] = await resolve(resolver);
-    }
+//     for (const [key, resolver] of Object.entries(mocks)) {
+//       resolved[key] = await resolve(resolver);
+//     }
 
-    return resolved;
-  }
+//     return resolved;
+//   }
 
-  expect(await traverseResolvers(mocks)).to.deep.equal({
-    Query: {
-      people: [{
-        name: 'Jim Halpert',
-        branch: 'Scranton',
-        likes: ['pranking dwight']
-      }]
-    }
-  })
-});
+//   expect(await traverseResolvers(mocks)).to.deep.equal({
+//     Query: {
+//       people: [{
+//         name: 'Jim Halpert',
+//         branch: 'Scranton',
+//         likes: ['pranking dwight']
+//       }]
+//     }
+//   })
+// });
 
 // test cases
 // * overwrite existing mock with new one
