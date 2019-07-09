@@ -1,9 +1,12 @@
-// import t from 'graphql-ast-types';
-import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType } from 'graphql';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver } from 'graphql';
+import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks } from "graphql-tools";
 import { expect } from 'chai';
 import R from 'ramda';
 
-import { addMockFunctionsToSchema, IMocks } from 'graphql-tools';
+
+interface IMocks {
+  [key: string]: IMockFn | { [key: string]: IMockFn } | { [key: string]: any }
+};
 
 const schemaString = `
   schema {
@@ -143,15 +146,19 @@ class Loupe {
   }
 
   mock(mockObject: IMocks) {
+    let mocks: IGraphQLToolsMocks = {};
+
     for (let [key, value] of Object.entries(mockObject)) {
-      if (typeof value === 'object') {
-        mockObject[key] = () => value;
+      if (typeof value !== 'function') {
+        mocks[key] = () => value;
+      } else {
+        mocks[key] = value as GraphQLFieldResolver<any, any>;
       }
     }
 
     addMockFunctionsToSchema({
       schema: this.schema,
-      mocks: mockObject
+      mocks
     });
 
     return this;
@@ -221,190 +228,172 @@ describe('loupe', function() {
     });
   });
 
-  // describe('mocking types', function() {
-  //   const query = `
-  //     query {
-  //       people {
-  //         name
-  //         address {
-  //           city
-  //         }
-  //       }
-  //     }
-  //   `;
+  describe('mocking', function() {
+    const query = `
+      query {
+        people {
+          name
+          address {
+            city
+          }
+        }
+      }
+    `;
 
-  //   context('with functions', function() {
-  //     it('can mock at the root level', async function() {
-  //       const mocks = {
-  //         Person: () => ({
-  //           name: 'Sam Malone'
-  //         }),
-  //         Address: () => ({
-  //           city: 'Boston'
-  //         })
-  //       };
+    it('can mock types directly', async function() {
+      const mocks = {
+        Person: () => ({
+          name: 'Sam Malone'
+        }),
+        Address: () => ({
+          city: 'Boston'
+        })
+      };
 
-  //       let result = await loupe
-  //         .mock(mocks)
-  //         .query(query);
+      let result = await loupe
+        .mock(mocks)
+        .query(query);
 
-  //       expect(result.data.people.name).to.equal('Sam Malone');
-  //       expect(result.data.people.address.city).to.equal('Boston');
-  //     });
-  //   });
+      expect(result.data!.people.name).to.equal('Sam Malone');
+      expect(result.data!.people.address.city).to.equal('Boston');
+    });
 
-  //   context('with objects', function() {
-  //     it('can mock at the root level', async function() {
-  //       const mocks = {
-  //         Person: {
-  //           name: 'Sam Malone'
-  //         },
-  //         Address: {
-  //           city: 'Boston'
-  //         }
-  //       };
+    it('can mock at the root level', async function() {
+      const mocks = {
+        Person: {
+          name: 'Sam Malone'
+        },
+        Address: {
+          city: 'Boston'
+        }
+      };
+      let result = await loupe
+        .mock(mocks)
+        .query(query);
+      expect(result.data!.people.name).to.equal('Sam Malone');
+      expect(result.data!.people.address.city).to.equal('Boston');
+    });
 
-  //       let result = await loupe
-  //         .mock(mocks)
-  //         .query(query);
+    it("can mock a field on the Query type", async function() {
+      const mocks = {
+        Query: {
+          people: () => ({
+            name: "Batman",
+            address: {
+              city: "Gotham City"
+            }
+          })
+        }
+      };
 
-  //       expect(result.data.people.name).to.equal('Sam Malone');
-  //       expect(result.data.people.address.city).to.equal('Boston');
-  //     });
-  //   });
-  // });
+      let result = await loupe.mock(mocks).query(query);
 
-  // describe('mocking queries', function() {
-  //   const query = `
-  //     query {
-  //       people {
-  //         name
-  //         address {
-  //           city
-  //         }
-  //       }
-  //     }
-  //   `;
-
-  //   it('can mock a query on the Query type', async function() {
-  //     const mocks = {
-  //       Query: {
-  //         people: () => ({
-  //           name: 'Batman',
-  //           address: {
-  //             city: 'Gotham City'
-  //           }
-  //         })
-  //       }
-  //     };
-
-  //     let result = await loupe
-  //       .mock(mocks)
-  //       .query(query);
-
-  //     expect(result.data.people.name).to.equal('Batman');
-  //     expect(result.data.people.address.city).to.equal('Gotham City');
-  //   });
-  // });
+      expect(result.data!.people.name).to.equal("Batman");
+      expect(result.data!.people.address.city).to.equal("Gotham City");
+    });
+  });
 });
 
-// it('resolves recursively', async function() {
-//   const mocks = {
-//     Query: resolverList({
-//       people: [resolverList(
-//         {
-//           name: 'Jim Halpert',
-//           branch: 'Scranton',
-//         },
-//         {
-//           branch: 'Stamford',
-//           likes: ['Swimming', 'Hiking']
-//         },
-//         {
-//           branch: () => 'Scranton',
-//           likes: () => ['paper']
-//         },
-//         {
-//           likes: () => Promise.resolve(['pranking dwight'])
-//         }
-//       )]
-//     })
-//   }
+describe('experimental proof of concept recursive mocking, not implemented...', function() {
+  // test cases
+  // * handle variables and arguments
+  // * need to be able to satisfy resolver args in functions,
+  //   including the data resolved from the parent.
+  // * add typescript typings
+  // * overwrite existing mock with new one
 
-//   function resolverList(...args) {
-//     args.__resolverList = true;
-//     return args;
-//   }
+  it('resolves recursively', async function() {
+    const mocks = {
+      Query: resolverList({
+        people: [resolverList(
+          {
+            name: 'Jim Halpert',
+            branch: 'Scranton',
+          },
+          {
+            branch: 'Stamford',
+            likes: ['Swimming', 'Hiking']
+          },
+          {
+            branch: () => 'Scranton',
+            likes: () => ['paper']
+          },
+          {
+            likes: () => Promise.resolve(['pranking dwight'])
+          }
+        )]
+      })
+    }
 
-//   function mergeRightAll(...objects) {
-//     return objects.reduce(((merged, obj) => {
-//       return R.mergeDeepWith((_a, b) => b, merged, obj);
-//     }), {})
-//   }
+    function resolverList(...args: any) {
+      args.__resolverList = true;
+      return args;
+    }
 
-//   const reduceResolvers = async (resolvers) => {
-//     const resolved = await Promise.all(resolvers.map(resolve));
-//     const shouldMerge = typeof resolved[0] === 'object' && resolvers.__resolverList;
+    function mergeRightAll(...objects: any) {
+      return objects.reduce(((merged: any, obj: any) => {
+        return R.mergeDeepWith((_a, b) => b, merged, obj);
+      }), {})
+    }
 
-//     if (Array.isArray(resolved[0])) {
-//       return resolved[resolved.length - 1];
-//     }
+    const reduceResolvers = async (resolvers: any) => {
+      const resolved = await Promise.all(resolvers.map(resolve));
+      const shouldMerge = typeof resolved[0] === 'object' && resolvers.__resolverList;
 
-//     if (shouldMerge) {
-//       if (resolved.length > 1) {
-//         return mergeRightAll(...resolved);
-//       } else {
-//         return resolved[0];
-//       }
-//     }
+      if (Array.isArray(resolved[0])) {
+        return resolved[resolved.length - 1];
+      }
 
-//     return resolved;
-//   }
+      if (shouldMerge) {
+        if (resolved.length > 1) {
+          return mergeRightAll(...resolved);
+        } else {
+          return resolved[0];
+        }
+      }
 
-//   async function resolve(resolver) {
-//     if (resolver.then) {
-//       return await Promise.resolve(resolver);
-//     }
+      return resolved;
+    }
 
-//     if (Array.isArray(resolver)) {
-//       return await reduceResolvers(resolver);
-//     }
+    async function resolve(resolver: any): Promise<any> {
+      if (resolver.then) {
+        return await Promise.resolve(resolver);
+      }
 
-//     if (typeof resolver === 'object') {
-//       return await traverseResolvers(resolver);
-//     }
+      if (Array.isArray(resolver)) {
+        return await reduceResolvers(resolver);
+      }
 
-//     if (typeof resolver === 'function') {
-//       return await resolve(resolver());
-//     }
+      if (typeof resolver === 'object') {
+        return await traverseResolvers(resolver);
+      }
 
-//     return resolver;
-//   }
+      if (typeof resolver === 'function') {
+        return await resolve(resolver());
+      }
+
+      return resolver;
+    }
 
 
-//   async function traverseResolvers(mocks) {
-//     const resolved = {};
+    async function traverseResolvers(mocks: any) {
+      const resolved: any = {};
 
-//     for (const [key, resolver] of Object.entries(mocks)) {
-//       resolved[key] = await resolve(resolver);
-//     }
+      for (const [key, resolver] of Object.entries(mocks)) {
+        resolved[key] = await resolve(resolver);
+      }
 
-//     return resolved;
-//   }
+      return resolved;
+    }
 
-//   expect(await traverseResolvers(mocks)).to.deep.equal({
-//     Query: {
-//       people: [{
-//         name: 'Jim Halpert',
-//         branch: 'Scranton',
-//         likes: ['pranking dwight']
-//       }]
-//     }
-//   })
-// });
-
-// test cases
-// * overwrite existing mock with new one
-// * handle variables and arguments
-// * ast getter
-// * path movement, up, down, siblings
+    expect(await traverseResolvers(mocks)).to.deep.equal({
+      Query: {
+        people: [{
+          name: 'Jim Halpert',
+          branch: 'Scranton',
+          likes: ['pranking dwight']
+        }]
+      }
+    })
+  });
+});
