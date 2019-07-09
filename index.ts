@@ -8,56 +8,37 @@ interface IMocks {
   [key: string]: IMockFn | { [key: string]: IMockFn } | { [key: string]: any }
 };
 
-const schemaString = `
-  schema {
-    query: Query
-  }
-
-  type Query {
-    people: Person
-  }
-
-  type Person {
-    name: String
-    address: Address
-  }
-
-  type Address {
-    city: String
-  }
-`;
-
-function followPath(fields: Field[], pathOfFieldnames: string[]): pathable[] {
+function followPath(fieldsPath: Field[], pathOfFieldnames: string[]): pathable[] {
   if (!pathOfFieldnames.length) {
-    return fields;
+    return fieldsPath;
   }
 
-  const field = fields[fields.length - 1];
+  const lastFieldInPath = fieldsPath[fieldsPath.length - 1];
 
-  if (field.type instanceof GraphQLObjectType) {
+  if (lastFieldInPath.type instanceof GraphQLObjectType) {
     const [fieldName, ...shiftedPath] = pathOfFieldnames;
-    const typeFields = field.type.getFields();
+    const typeFields = lastFieldInPath.type.getFields();
     const childField = typeFields[fieldName];
 
     if (childField) {
-      return followPath([...fields, childField], shiftedPath)
+      return followPath([...fieldsPath, childField], shiftedPath)
     } else {
       throw `Could not find ${fieldName}`;
     }
   }
 
-  return fields;
+  return fieldsPath;
 }
 
 type Field = GraphQLField<any, any>;
 type pathable = GraphQLSchema | GraphQLObjectType | Field;
-type schemable = string | GraphQLSchema;
+type Schemable = string | GraphQLSchema;
 
 class Loupe {
   private _schema: GraphQLSchema;
   pathScope: pathable[];
 
-  constructor(schema: schemable) {
+  constructor(schema: Schemable) {
     if (typeof schema === 'string') {
       schema = buildSchema(schema);
     }
@@ -91,9 +72,7 @@ class Loupe {
       pathScope = [this.schema];
     }
 
-    const l = new Loupe(this.schema);
-    l.pathScope = pathScope;
-    return l;
+    return this.clone(pathScope);
   }
 
   path(pathString: string) {
@@ -135,10 +114,7 @@ class Loupe {
 
     pathScope.push(...fields);
 
-    const l = new Loupe(this.schema);
-    // set new instance with updated pathScope
-    l.pathScope = pathScope;
-    return l;
+    return this.clone(pathScope);
   }
 
   async query(queryString: string) {
@@ -163,50 +139,79 @@ class Loupe {
 
     return this;
   }
+
+  clone(pathScope: pathable[]) {
+    if (!pathScope) {
+      pathScope = this.pathScope
+    }
+
+    const newLoupe = new Loupe(this.schema);
+    newLoupe.pathScope = pathScope;
+    return newLoupe;
+  }
 }
 
 
-function l(schema: schemable) {
+export function loupe(schema: Schemable) {
   return new Loupe(schema);
 }
 
 describe('loupe', function() {
-  let loupe: Loupe;
+  const schemaString = `
+    schema {
+      query: Query
+    }
+
+    type Query {
+      people: Person
+    }
+
+    type Person {
+      name: String
+      address: Address
+    }
+
+    type Address {
+      city: String
+    }
+  `;
+
+  let l: Loupe;
 
   beforeEach(() => {
-    loupe = l(schemaString);
+    l = loupe(schemaString);
   });
 
   it('accepts a schema string', function () {
-    expect(loupe).to.be.instanceOf(Loupe);
+    expect(l).to.be.instanceOf(Loupe);
   });
 
   context('navigating', function() {
     context('traversing down a path', function() {
       it('scopes a path to the `Query` type', function () {
-        const result = loupe.path('Query');
+        const result = l.path('Query');
         expect((result.scope as GraphQLNamedType).name).to.equal('Query')
       });
 
       it('scopes a path to a type', function() {
-        const result = loupe.path('Person');
+        const result = l.path('Person');
         expect((result.scope as GraphQLNamedType).name).to.equal('Person')
       });
 
       it('scopes a path to a field on a type', function() {
-        const result = loupe.path('Person.name');
+        const result = l.path('Person.name');
         expect((result.scope as GraphQLNamedType).name).to.equal('name')
       });
 
       it('scopes a path to a nested field on a type', function() {
-        const result = loupe.path('Person.address.city');
+        const result = l.path('Person.address.city');
         const scope = result.scope as Field;
         expect(scope.name).to.equal('city');
         expect((scope.type as GraphQLScalarType).name).to.equal('String');
       });
 
       it('scopes a path to a field on the root `Query` type', function() {
-        const result = loupe.path('Query.people');
+        const result = l.path('Query.people');
         const scope = result.scope as Field;
         expect(scope.name).to.equal('people');
         expect((scope.type as GraphQLObjectType).name).to.equal('Person');
@@ -215,13 +220,13 @@ describe('loupe', function() {
 
     context('traversing up', function() {
       it('can traverse up from a Type to the root schema', function () {
-        const result = loupe.path('Person').parent;
+        const result = l.path('Person').parent;
         expect(result.isRoot).to.be.true;
         expect(result.scope instanceof GraphQLSchema).to.be.true;
       });
 
       it('can traverse up from a field to its type', function () {
-        const result = loupe.path('Person.name').parent;
+        const result = l.path('Person.name').parent;
         const scope = result.scope as Field;
         expect(scope.name).to.equal('Person')
       });
@@ -250,7 +255,7 @@ describe('loupe', function() {
         })
       };
 
-      let result = await loupe
+      let result = await l
         .mock(mocks)
         .query(query);
 
@@ -267,7 +272,7 @@ describe('loupe', function() {
           city: 'Boston'
         }
       };
-      let result = await loupe
+      let result = await l
         .mock(mocks)
         .query(query);
       expect(result.data!.people.name).to.equal('Sam Malone');
@@ -286,7 +291,7 @@ describe('loupe', function() {
         }
       };
 
-      let result = await loupe.mock(mocks).query(query);
+      let result = await l.mock(mocks).query(query);
 
       expect(result.data!.people.name).to.equal("Batman");
       expect(result.data!.people.address.city).to.equal("Gotham City");
