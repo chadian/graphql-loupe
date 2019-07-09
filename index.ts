@@ -64,14 +64,12 @@ class Loupe {
   }
 
   get parent() {
-    let pathScope: pathable[];
-
-    if (this.pathScope.length > 1) {
-      pathScope = this.pathScope.splice(0, this.pathScope.length - 1);
-    } else {
-      pathScope = [this.schema];
+    if (this.pathScope.length === 1) {
+      return this;
     }
 
+    let pathScope: pathable[];
+    pathScope = this.pathScope.splice(0, this.pathScope.length - 1);
     return this.clone(pathScope);
   }
 
@@ -218,7 +216,12 @@ describe('loupe', function() {
       });
     });
 
-    context('traversing up', function() {
+    context('#parent', function() {
+      it('when traversing past the schema it returns itself', function() {
+        const result = l.parent;
+        expect(result).to.equal(l);
+      });
+
       it('can traverse up from a Type to the root schema', function () {
         const result = l.path('Person').parent;
         expect(result.isRoot).to.be.true;
