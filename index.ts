@@ -1,4 +1,4 @@
-import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver } from 'graphql';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType } from 'graphql';
 import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks } from "graphql-tools";
 import { expect } from 'chai';
 import R from 'ramda';
@@ -34,6 +34,26 @@ type Field = GraphQLField<any, any>;
 type pathable = GraphQLSchema | GraphQLObjectType | Field;
 type Schemable = string | GraphQLSchema;
 
+
+// Make a key on type optional
+// https://stackoverflow.com/questions/43159887/make-a-single-property-optional-in-typescript
+type Overwrite<T1, T2> = {
+    [P in Exclude<keyof T1, keyof T2>]: T1[P]
+} & T2;
+
+type GraphQLInputTypeWithOptionalName = Overwrite<GraphQLInputType, {
+  name?: String
+}>
+
+type Argument = {
+  readonly name: GraphQLArgument["name"]
+  readonly description?: GraphQLArgument["description"]
+  readonly defaultValue?: GraphQLArgument["defaultValue"]
+  readonly type: GraphQLInputTypeWithOptionalName;
+  readonly astNode?: GraphQLArgument["astNode"]
+  raw: GraphQLArgument
+}
+
 class Loupe {
   private _schema: GraphQLSchema;
   pathScope: pathable[];
@@ -61,6 +81,29 @@ class Loupe {
 
   get ast() {
     return this.scope.astNode;
+  }
+
+  get name() {
+    if (this.scope instanceof GraphQLSchema) {
+      return '#Schema';
+    }
+
+    return this.scope.name;
+  }
+
+  get arguments(): Argument[] | null {
+    if (this.scope instanceof GraphQLSchema || this.scope instanceof GraphQLObjectType) {
+      return null;
+    }
+
+    return this.scope.args.map(arg => {
+      const argument = {
+        ...arg,
+        raw: arg
+      };
+
+      return argument;
+    })
   }
 
   get parent() {
@@ -161,7 +204,13 @@ describe('loupe', function() {
     }
 
     type Query {
-      people: Person
+      people(
+        """
+        pageCount is used for pagination
+        Specify the numbebr of people to include per page
+        """
+        pageCount: Int = 10
+      ): Person
     }
 
     type Person {
@@ -185,7 +234,7 @@ describe('loupe', function() {
   });
 
   context('navigating', function() {
-    context('traversing down a path', function() {
+    context('#path', function() {
       it('scopes a path to the `Query` type', function () {
         const result = l.path('Query');
         expect((result.scope as GraphQLNamedType).name).to.equal('Query')
@@ -232,6 +281,44 @@ describe('loupe', function() {
         const result = l.path('Person.name').parent;
         const scope = result.scope as Field;
         expect(scope.name).to.equal('Person')
+      });
+    });
+
+    context('#name', function() {
+      it('returns #Schema for the name of the GraphQLSchema', function() {
+        const result = l.name;
+        expect(result).to.equal('#Schema');
+      });
+
+      it('returns the name of a type', function() {
+        const result = l.path('Query').name;
+        expect(result).to.equal('Query');
+      });
+
+      it('returns the name of a nested scalar', function() {
+        const result = l.path("Query.people").name;
+        expect(result).to.equal("people");
+      });
+    });
+
+    context('#arguments', function() {
+      it('returns null for the Schema and GraphQLObjectType', function() {
+        expect(l.arguments).to.equal(null);
+        expect(l.path('Query').arguments).to.equal(null);
+      });
+
+      it('returns an empty array when there are no field arguments', function() {
+        expect(l.path('Address.city').arguments).to.eql([]);
+      });
+
+      it('returns an array of arguments when there are arguments', function() {
+        const [argument] = l.path("Query.people").arguments as Argument[];
+        expect(argument.name).to.equal('pageCount');
+        expect(argument.type.name).to.equal('Int');
+        expect(argument.defaultValue).to.eql(10);
+        expect(argument.description).to.eql(
+          'pageCount is used for pagination\nSpecify the numbebr of people to include per page'
+        );
       });
     });
   });
