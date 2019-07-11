@@ -1,5 +1,5 @@
 import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType } from 'graphql';
-import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks } from "graphql-tools";
+import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks, ExpandAbstractTypes } from "graphql-tools";
 import { expect } from 'chai';
 import R from 'ramda';
 
@@ -67,10 +67,6 @@ class Loupe {
     this.pathScope = [this.schema]
   }
 
-  get isRoot() {
-    return this.scope instanceof GraphQLSchema;
-  }
-
   get scope() {
     return this.pathScope[this.pathScope.length - 1]
   }
@@ -89,6 +85,34 @@ class Loupe {
     }
 
     return this.scope.name;
+  }
+
+  get type() {
+    // TODO: Handle case for GraphQLList, `type.name` doesn't exist on it
+    if (this.scope instanceof GraphQLSchema) {
+      return '#Schema';
+    } else if (this.scope instanceof GraphQLObjectType) {
+      // If we're looking at a type, the type is it's own name
+      return this.scope.name;
+    } else if ('name' in this.scope.type) {
+      return this.scope.type.name;
+    }
+  }
+
+  get isRoot() {
+    return this.scope instanceof GraphQLSchema;
+  }
+
+  get isSchema() {
+    return this.isRoot;
+  }
+
+  get isType() {
+    return this.scope instanceof GraphQLSchema;
+  }
+
+  get isField() {
+      return this.scope.astNode && this.scope.astNode.kind === 'FieldDefinition';
   }
 
   get arguments(): Argument[] | null {
@@ -129,7 +153,7 @@ class Loupe {
       const type = this.schema.getType(typeString);
 
       if (!(type instanceof GraphQLObjectType)) {
-        throw new TypeError(`${typeString} is not an Object Type that can be used for the path`);
+        throw new TypeError(`${typeString} was not found as known Type on the schema`);
       }
 
       // push type on to path
@@ -263,64 +287,84 @@ describe('loupe', function() {
         expect(scope.name).to.equal('people');
         expect((scope.type as GraphQLObjectType).name).to.equal('Person');
       });
-    });
 
-    context('#parent', function() {
-      it('when traversing past the schema it returns itself', function() {
-        const result = l.parent;
-        expect(result).to.equal(l);
-      });
+      context('#parent', function () {
+        it('when traversing past the schema it returns itself', function () {
+          const result = l.parent;
+          expect(result).to.equal(l);
+        });
 
-      it('can traverse up from a Type to the root schema', function () {
-        const result = l.path('Person').parent;
-        expect(result.isRoot).to.be.true;
-        expect(result.scope instanceof GraphQLSchema).to.be.true;
-      });
+        it('can traverse up from a Type to the root schema', function () {
+          const result = l.path('Person').parent;
+          expect(result.isRoot).to.be.true;
+          expect(result.scope instanceof GraphQLSchema).to.be.true;
+        });
 
-      it('can traverse up from a field to its type', function () {
-        const result = l.path('Person.name').parent;
-        const scope = result.scope as Field;
-        expect(scope.name).to.equal('Person')
-      });
-    });
-
-    context('#name', function() {
-      it('returns #Schema for the name of the GraphQLSchema', function() {
-        const result = l.name;
-        expect(result).to.equal('#Schema');
-      });
-
-      it('returns the name of a type', function() {
-        const result = l.path('Query').name;
-        expect(result).to.equal('Query');
-      });
-
-      it('returns the name of a nested scalar', function() {
-        const result = l.path("Query.people").name;
-        expect(result).to.equal("people");
+        it('can traverse up from a field to its type', function () {
+          const result = l.path('Person.name').parent;
+          const scope = result.scope as Field;
+          expect(scope.name).to.equal('Person')
+        });
       });
     });
+  });
 
-    context('#arguments', function() {
-      it('returns null for the Schema and GraphQLObjectType', function() {
-        expect(l.arguments).to.equal(null);
-        expect(l.path('Query').arguments).to.equal(null);
-      });
-
-      it('returns an empty array when there are no field arguments', function() {
-        expect(l.path('Address.city').arguments).to.eql([]);
-      });
-
-      it('returns an array of arguments when there are arguments', function() {
-        const [argument] = l.path("Query.people").arguments as Argument[];
-        expect(argument.name).to.equal('pageCount');
-        expect(argument.type.name).to.equal('Int');
-        expect(argument.defaultValue).to.eql(10);
-        expect(argument.description).to.eql(
-          'pageCount is used for pagination\nSpecify the numbebr of people to include per page'
-        );
-      });
+  context('#name', function () {
+    it('returns #Schema for the name of the GraphQLSchema', function () {
+      const result = l.name;
+      expect(result).to.equal('#Schema');
     });
+
+    it('returns the name of a type', function () {
+      const result = l.path('Query').name;
+      expect(result).to.equal('Query');
+    });
+
+    it('returns the name of a nested scalar', function () {
+      const result = l.path("Query.people").name;
+      expect(result).to.equal("people");
+    });
+  });
+
+  context('#type', function() {
+    it('returns the type from a schema', function() {
+      expect(l.type).to.equal('#Schema');
+    });
+
+    it('returns the type name from a type', function() {
+      expect(l.path('Query').type).to.equal('Query');
+    });
+
+    it('returns the return type of a field', function() {
+      expect(l.path('Person.name').type).to.equal('String');
+    });
+  });
+
+  context('#arguments', function() {
+    it('returns null for the Schema and GraphQLObjectType', function () {
+      expect(l.arguments).to.equal(null);
+      expect(l.path('Query').arguments).to.equal(null);
+    });
+
+    it('returns an empty array when there are no field arguments', function () {
+      expect(l.path('Address.city').arguments).to.eql([]);
+    });
+
+    it('returns an array of arguments when there are arguments', function () {
+      const [argument] = l.path("Query.people").arguments as Argument[];
+      expect(argument.name).to.equal('pageCount');
+      expect(argument.type.name).to.equal('Int');
+      expect(argument.defaultValue).to.eql(10);
+      expect(argument.description).to.eql(
+        'pageCount is used for pagination\nSpecify the numbebr of people to include per page'
+      );
+    });
+  });
+
+  it('#isField', function() {
+    expect(l.isField).to.be.false;
+    expect(l.path('Address').isField).to.be.false;
+    expect(l.path('Address.city').isField).to.be.true;
   });
 
   describe('mocking', function() {
