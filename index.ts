@@ -1,4 +1,4 @@
-import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType } from 'graphql';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull } from 'graphql';
 import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks, ExpandAbstractTypes } from "graphql-tools";
 import { expect } from 'chai';
 import R from 'ramda';
@@ -94,6 +94,9 @@ class Loupe {
     } else if (this.scope instanceof GraphQLObjectType) {
       // If we're looking at a type, the type is it's own name
       return this.scope.name;
+    } else if ('ofType' in this.scope.type) {
+      // handle the cases where it's non-null
+      return this.scope.type.ofType.name;
     } else if ('name' in this.scope.type) {
       return this.scope.type.name;
     }
@@ -113,6 +116,14 @@ class Loupe {
 
   get isField() {
       return this.scope.astNode && this.scope.astNode.kind === 'FieldDefinition';
+  }
+
+  get isNonNull() {
+    if (this.isField) {
+      return (this.scope as Field).type instanceof GraphQLNonNull;
+    }
+
+    return false;
   }
 
   get arguments(): Argument[] | null {
@@ -240,6 +251,7 @@ describe('loupe', function() {
     type Person {
       name: String
       address: Address
+      socialSecurityNumber: ID!
     }
 
     type Address {
@@ -337,6 +349,28 @@ describe('loupe', function() {
 
     it('returns the return type of a field', function() {
       expect(l.path('Person.name').type).to.equal('String');
+    });
+
+    it('returns the unwrapped non-null type', function() {
+      expect(l.path('Person.socialSecurityNumber').type).to.equal('ID');
+    });
+  });
+
+  context('#isNonNull', function() {
+    it('returns true for a non-null field', function() {
+      expect(l.path('Person.socialSecurityNumber').isNonNull).to.be.true;
+    });
+
+    it('returns false for a nullable field', function() {
+      expect(l.path('Person.name').isNonNull).to.be.false;
+    });
+
+    it('returns false for a type', function() {
+      expect(l.path('Person').isNonNull).to.be.false;
+    });
+
+    it('returns false for the Schema', function() {
+      expect(l.isNonNull).to.be.false;
     });
   });
 
