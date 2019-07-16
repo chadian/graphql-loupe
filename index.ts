@@ -1,4 +1,4 @@
-import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull } from 'graphql';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull, GraphQLList } from 'graphql';
 import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks, ExpandAbstractTypes } from "graphql-tools";
 import { expect } from 'chai';
 import R from 'ramda';
@@ -95,7 +95,7 @@ class Loupe {
       // If we're looking at a type, the type is it's own name
       return this.scope.name;
     } else if ('ofType' in this.scope.type) {
-      // handle the cases where it's non-null
+      // handle the cases where it's non-null or a list
       return this.scope.type.ofType.name;
     } else if ('name' in this.scope.type) {
       return this.scope.type.name;
@@ -121,6 +121,14 @@ class Loupe {
   get isNonNull() {
     if (this.isField) {
       return (this.scope as Field).type instanceof GraphQLNonNull;
+    }
+
+    return false;
+  }
+
+  get isList() {
+    if (this.isField) {
+      return (this.scope as Field).type instanceof GraphQLList;
     }
 
     return false;
@@ -251,7 +259,8 @@ describe('loupe', function() {
     type Person {
       name: String
       address: Address
-      socialSecurityNumber: ID!
+      socialSecurityNumber: String!
+      friends: [Person]
     }
 
     type Address {
@@ -352,7 +361,11 @@ describe('loupe', function() {
     });
 
     it('returns the unwrapped non-null type', function() {
-      expect(l.path('Person.socialSecurityNumber').type).to.equal('ID');
+      expect(l.path('Person.socialSecurityNumber').type).to.equal('String');
+    });
+
+    it('returns the unwrapped list type', function() {
+      expect(l.path('Person.friends').type).to.equal('Person');
     });
   });
 
@@ -371,6 +384,24 @@ describe('loupe', function() {
 
     it('returns false for the Schema', function() {
       expect(l.isNonNull).to.be.false;
+    });
+  });
+
+  context('#isList', function() {
+    it('returns true for a non-null field', function() {
+      expect(l.path('Person.friends').isList).to.be.true;
+    });
+
+    it('returns false for a nullable field', function() {
+      expect(l.path('Person.name').isList).to.be.false;
+    });
+
+    it('returns false for a type', function() {
+      expect(l.path('Person').isList).to.be.false;
+    });
+
+    it('returns false for the Schema', function() {
+      expect(l.isList).to.be.false;
     });
   });
 
