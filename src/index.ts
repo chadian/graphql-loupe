@@ -1,16 +1,15 @@
-import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull, GraphQLList } from 'graphql';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull, GraphQLList, GraphQLInputObjectType, isInputType, isOutputType, coerceValue } from 'graphql';
 import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks } from "graphql-tools";
 import { followPath } from './utils/follow-path';
+import { pick } from 'ramda';
 
 interface IMocks {
   [key: string]: IMockFn | { [key: string]: IMockFn } | { [key: string]: any }
 };
 
-
 export type Field = GraphQLField<any, any>;
 export type Pathable = GraphQLSchema | GraphQLObjectType | Field;
 type Schemable = string | GraphQLSchema;
-
 
 // Make a key on type optional
 // https://stackoverflow.com/questions/43159887/make-a-single-property-optional-in-typescript
@@ -29,6 +28,15 @@ type Argument = {
   readonly type: GraphQLInputTypeWithOptionalName;
   readonly astNode?: GraphQLArgument["astNode"]
   raw: GraphQLArgument
+}
+
+type GraphQLType = GraphQLInputType | GraphQLObjectType
+function isGraphQLType(sample: any): sample is GraphQLType {
+  if (isOutputType(sample) || isInputType(sample)) {
+    return true;
+  }
+
+  return false;
 }
 
 export class Loupe {
@@ -87,7 +95,7 @@ export class Loupe {
   }
 
   get isType() {
-    return this.scope instanceof GraphQLSchema;
+    return isGraphQLType(this.scope);
   }
 
   get isField() {
@@ -175,6 +183,21 @@ export class Loupe {
     pathScope.push(...fields);
 
     return this.clone(pathScope);
+  }
+
+  trimObject(obj: any) {
+    if (!this.isType) {
+      throw new TypeError('trimObject only works on GraphQL types not ' + this.type);
+    }
+
+    const type = this.scope;
+
+    if (!('getFields' in type)) {
+      throw new TypeError('trimObject only works with GraphQL types that have fields');
+    }
+
+    const fieldKeys = Object.keys(type.getFields());
+    return pick(fieldKeys, obj)
   }
 
   async query(queryString: string) {
