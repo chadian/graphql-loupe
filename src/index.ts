@@ -1,7 +1,8 @@
-import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull, GraphQLList, GraphQLInputObjectType, isInputType, isOutputType, coerceValue } from 'graphql';
+import { graphql, buildSchema, GraphQLSchema, GraphQLNamedType, GraphQLObjectType, GraphQLField, GraphQLScalarType, GraphQLFieldResolver, GraphQLArgument, GraphQLInputType, GraphQLNonNull, GraphQLList, GraphQLInputObjectType, isInputType, isOutputType, coerceValue, GraphQLType } from 'graphql';
 import { addMockFunctionsToSchema, IMockFn, IMocks as IGraphQLToolsMocks } from "graphql-tools";
 import { followPath } from './utils/follow-path';
 import { pick } from 'ramda';
+import trim from 'ramda/es/trim';
 
 interface IMocks {
   [key: string]: IMockFn | { [key: string]: IMockFn } | { [key: string]: any }
@@ -30,7 +31,6 @@ type Argument = {
   raw: GraphQLArgument
 }
 
-type GraphQLType = GraphQLInputType | GraphQLObjectType
 function isGraphQLType(sample: any): sample is GraphQLType {
   if (isOutputType(sample) || isInputType(sample)) {
     return true;
@@ -133,6 +133,14 @@ export class Loupe {
     })
   }
 
+  get unwrappedType() {
+    if ('ofType' in this.scope.type) {
+      return this.scope.type.ofType;
+    }
+
+    return this.scope.type;
+  }
+
   get parent() {
     if (this.pathScope.length === 1) {
       return this;
@@ -186,18 +194,29 @@ export class Loupe {
   }
 
   trimObject(obj: any) {
-    if (!this.isType) {
-      throw new TypeError('trimObject only works on GraphQL types not ' + this.type);
+    if (!this.isType && !this.isField) {
+      throw new TypeError('trimObject only works on user-defined types and fields not ' + this.type);
     }
 
-    const type = this.scope;
+    const type = this.isField ? this.unwrappedType : this.scope;
 
     if (!('getFields' in type)) {
       throw new TypeError('trimObject only works with GraphQL types that have fields');
     }
 
     const fieldKeys = Object.keys(type.getFields());
-    return pick(fieldKeys, obj)
+    const trimmed = pick(fieldKeys, obj);
+
+    for (let key of fieldKeys) {
+      const fieldLoupe = this.path(key);
+      const fieldType = fieldLoupe.unwrappedType;
+
+      if (fieldType instanceof GraphQLObjectType){
+        trimmed[key] = fieldLoupe.trimObject(trimmed[key])
+      }
+    }
+
+    return trimmed;
   }
 
   async query(queryString: string) {
