@@ -34,8 +34,8 @@ describe('#mock', function () {
       .mock(mocks)
       .query(query);
 
-    expect(result.data!.people.name).to.equal('Sam Malone');
-    expect(result.data!.people.address.city).to.equal('Boston');
+    expect(result.data!.people[0].name).to.equal('Sam Malone');
+    expect(result.data!.people[0].address.city).to.equal('Boston');
   });
 
   it('can mock at the root level', async function () {
@@ -50,25 +50,25 @@ describe('#mock', function () {
     let result = await l
       .mock(mocks)
       .query(query);
-    expect(result.data!.people.name).to.equal('Sam Malone');
-    expect(result.data!.people.address.city).to.equal('Boston');
+    expect(result.data!.people[0].name).to.equal('Sam Malone');
+    expect(result.data!.people[0].address.city).to.equal('Boston');
   });
 
   it("can mock a field on the Query type", async function () {
     const mocks = {
       Query: {
-        people: () => ({
+        people: () => ([{
           name: "Batman",
           address: {
             city: "Gotham City"
           }
-        })
+        }])
       }
     };
 
     let result = await l.mock(mocks).query(query);
 
-    expect(result.data!.people.name).to.equal("Batman");
-    expect(result.data!.people.address.city).to.equal("Gotham City");
+    expect(result.data!.people[0].name).to.equal("Batman");
+    expect(result.data!.people[0].address.city).to.equal("Gotham City");
   });
 });

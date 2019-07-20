@@ -9,7 +9,7 @@ interface IMocks {
 };
 
 export type Field = GraphQLField<any, any>;
-export type Pathable = GraphQLSchema | GraphQLObjectType | Field;
+export type Pathable = GraphQLSchema | GraphQLObjectType | Field | GraphQLList<any> | GraphQLNonNull<any>;
 type Schemable = string | GraphQLSchema;
 
 // Make a key on type optional
@@ -61,7 +61,11 @@ export class Loupe {
       return '#Schema';
     }
 
-    return this.scope.name;
+    if (this.isField) {
+      return (this.scope as Field).name;
+    }
+
+    return this.type;
   }
 
   get type(): String {
@@ -69,6 +73,10 @@ export class Loupe {
       return '#Schema';
     } else if (this.isObjectType) {
       return (this.scope as GraphQLObjectType).name;
+    } else if (this.isList) {
+      return `[${(this.scope as GraphQLList<any>).type.ofType.name}]`;
+    } else if (this.isNonNull) {
+      return `${this.scope.type.ofType.name}!`;
     } else if (this.isField && 'name' in (this.scope as Field).type) {
       return (this.scope && 'type' in this.scope && 'name' in this.scope.type && this.scope.type.name) || ""
     }
@@ -164,6 +172,8 @@ export class Loupe {
   }
 
   path(pathString: string) {
+    const unwrapType = (type: GraphQLType) => 'ofType' in type ? type.ofType : type;
+
     let requestedPath = pathString.split('.');
     const pathScope: Pathable[] = Object.assign([], this.pathScope);
 
@@ -173,7 +183,7 @@ export class Loupe {
 
     if (this.isRoot) {
       const typeString = requestedPath.shift() as string;
-      const type = this.schema.getType(typeString);
+      const type = unwrapType(this.schema.getType(typeString));
 
       if (!(type instanceof GraphQLObjectType)) {
         throw new TypeError(`${typeString} was not found as known Type on the schema`);

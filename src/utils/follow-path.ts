@@ -1,5 +1,7 @@
 import * as Loupe from '../index'
-import { GraphQLObjectType } from 'graphql';
+import { GraphQLObjectType, GraphQLList, isNonNullType, isListType, GraphQLType } from 'graphql';
+
+const unwrapType = (type: GraphQLType) => 'ofType' in type ? type.ofType : type;
 
 export function followPath(fieldsPath: Loupe.Field[], pathOfFieldnames: string[]): Loupe.Pathable[] {
   if (!pathOfFieldnames.length) {
@@ -7,11 +9,16 @@ export function followPath(fieldsPath: Loupe.Field[], pathOfFieldnames: string[]
   }
 
   const lastFieldInPath = fieldsPath[fieldsPath.length - 1];
+  let type = unwrapType(lastFieldInPath.type);
 
-  if (lastFieldInPath.type instanceof GraphQLObjectType) {
+  if (type instanceof GraphQLObjectType) {
     const [fieldName, ...shiftedPath] = pathOfFieldnames;
-    const typeFields = lastFieldInPath.type.getFields();
-    const childField = typeFields[fieldName];
+
+    let childField;
+    if ('getFields' in type) {
+      const typeFields = type.getFields();
+      childField = typeFields[fieldName];
+    }
 
     if (childField) {
       return followPath([...fieldsPath, childField], shiftedPath)

@@ -4,13 +4,15 @@ export const schemaString = `
     }
 
     type Query {
+      person(name: String): Person
+
       people(
         """
         pageCount is used for pagination
         Specify the numbebr of people to include per page
         """
         pageCount: Int = 10
-      ): Person
+      ): [Person]
     }
 
     type Person {
