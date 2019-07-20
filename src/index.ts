@@ -215,12 +215,21 @@ export class Loupe {
     return this.clone(pathScope);
   }
 
-  trimObject(obj: any) {
+  trimObject(obj: any): any {
     if (!this.isGraphQLType && !this.isField) {
-      throw new TypeError('trimObject only works on user-defined types and fields not ' + this.unwrappedType);
+      return obj;
     }
 
-    const type = this.isField ? this.unwrappedGraphQLType : this.scope;
+    if (this.isList && Array.isArray(obj)) {
+      return obj.map(item => this.trimObject(item));
+    }
+
+    let type;
+    if (this.isField) {
+      type = this.unwrappedGraphQLType
+    } else {
+      type = this.scope
+    }
 
     if (!type) return;
 
