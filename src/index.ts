@@ -114,6 +114,10 @@ export class Loupe {
     return this.isRoot;
   }
 
+  get isType() {
+    return this.isGraphQLType;
+  }
+
   get isGraphQLType() {
     return isType(this.scope);
   }
@@ -177,31 +181,36 @@ export class Loupe {
     let requestedPath = pathString.split('.');
     const pathScope: Pathable[] = Object.assign([], this.pathScope);
 
-    if (requestedPath.length < 1) {
+    if (requestedPath.length === 0) {
       return this;
     }
 
     if (this.isRoot) {
       const typeString = requestedPath.shift() as string;
-      const type = unwrapType(this.schema.getType(typeString));
+      let type = this.schema.getType(typeString);
 
       if (!(type instanceof GraphQLObjectType)) {
         throw new TypeError(`${typeString} was not found as known Type on the schema`);
       }
 
+      type = unwrapType(type) as GraphQLObjectType;
+
       // push type on to path
       pathScope.push(type);
+
+      // recurse with the remaining fields if there are any
+      return this.clone(pathScope).path(requestedPath.join('.'));
     }
 
     let fields: Field[] = [];
     if (requestedPath.length > 0) {
       let startingField;
 
-      if (pathScope.length === 2) {
+      if (this.isType) {
         const type = pathScope[pathScope.length - 1] as GraphQLObjectType;
         const fieldName = requestedPath.shift() as string;
         startingField = type.getFields()[fieldName];
-      } else {
+      } else if (this.isField) {
         startingField = pathScope[pathScope.length - 1];
       }
 
